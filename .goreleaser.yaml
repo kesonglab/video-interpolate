@@ -1,0 +1,76 @@
+version: 2
+
+project_name: vif
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/vif
+    binary: vif
+    id: vif
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/kesonglab/video-interpolate/internal/version.Version={{.Version}}
+      - -X github.com/kesonglab/video-interpolate/internal/version.Commit={{.Commit}}
+      - -X github.com/kesonglab/video-interpolate/internal/version.Date={{.Date}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows  # Phase 4 不打 windows
+
+archives:
+  - id: vif
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+    formats:
+      - tar.gz
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Version }}-next"
+
+changelog:
+  use: git
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?!?:.*$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*?fix(\(.+\))?!?:.*$'
+      order: 1
+    - title: Others
+      order: 999
+
+brews:
+  - repository:
+      owner: kesonglab
+      name: homebrew-tap
+      branch: main
+    homepage: "https://github.com/kesonglab/video-interpolate"
+    description: "AI video frame interpolation TUI"
+    license: "MIT"
+    install: |
+      bin.install "vif"
+    test: |
+      system "#{bin}/vif", "version"
+
+release:
+  github:
+    owner: kesonglab
+    name: video-interpolate
+  draft: true  # 默认 draft，避免误推半成品
+  prerelease: auto
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
