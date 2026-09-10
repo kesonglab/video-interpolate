@@ -2,12 +2,20 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/kesonglab/video-interpolate/internal/config"
 	"github.com/kesonglab/video-interpolate/internal/pipeline"
 	"github.com/kesonglab/video-interpolate/internal/system"
+	"github.com/kesonglab/video-interpolate/internal/version"
 )
+
+// authorLine is the gray right side of every banner.
+const authorLine = "kesonglab💗 · RIFE 插帧 · queen style"
+
+// appTitle is the crown title, e.g. "vif v0.1.0".
+func appTitle() string { return "vif " + version.Version }
 
 // Page is the per-screen contract. Update returns the next page and any cmds;
 // a page returns itself to stay put.
@@ -33,11 +41,20 @@ type SharedContext struct {
 	SourceFPS  float64 // first source fps, set once probed
 
 	// Phase 2b: live pipeline wiring.
-	EventsCh    chan pipeline.Event
-	Orch        *pipeline.Orchestrator
-	CancelRun   context.CancelFunc
-	Summary     BatchSummary
-	MascotFrame int
+	EventsCh  chan pipeline.Event
+	Orch      *pipeline.Orchestrator
+	CancelRun context.CancelFunc
+	Summary   BatchSummary
+
+	// Toast is the inline notice shown at the bottom for a few seconds.
+	Toast      string
+	ToastUntil time.Time
+}
+
+// AddToast shows msg for four seconds.
+func (c *SharedContext) AddToast(msg string) {
+	c.Toast = msg
+	c.ToastUntil = time.Now().Add(4 * time.Second)
 }
 
 // NewContext seeds defaults from the loaded config.

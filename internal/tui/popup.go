@@ -128,7 +128,7 @@ func (p Popup) box() string {
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#BD93F9")).
+		BorderForeground(render.ColorBlue).
 		Padding(1, 2).
 		Render(content)
 }

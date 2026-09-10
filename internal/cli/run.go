@@ -257,7 +257,7 @@ func printEvents(w io.Writer, events <-chan pipeline.Event, idx map[string]int, 
 			if ev.ChunkTotal > 1 {
 				label = fmt.Sprintf("%s %d/%d", label, ev.ChunkCurrent, ev.ChunkTotal)
 			}
-			line := fmt.Sprintf("\r  %s %s %3.0f%%", label, render.ProgressBar(ev.Progress), ev.Progress)
+			line := fmt.Sprintf("\r  %s %s %3.0f%%", label, render.Accent.Render(render.RenderBar(ev.Progress, 16)), ev.Progress)
 			if ev.FPS > 0 {
 				line += fmt.Sprintf("  %.1f fps", ev.FPS)
 			}

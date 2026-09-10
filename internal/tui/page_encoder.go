@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/kesonglab/video-interpolate/internal/render"
 	"github.com/kesonglab/video-interpolate/internal/tui/components"
 )
@@ -75,16 +77,12 @@ func (p *encoderPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		case p.km.matches(msg, p.km.Tab):
 			p.group = (p.group + 1) % 2
 		case p.km.matches(msg, p.km.Up) || key.Text == "k":
-			if p.group == groupEncoder && p.encCur > 0 {
-				p.encCur--
-			} else if p.group == groupPreset && p.preCur > 0 {
-				p.preCur--
-			}
+			p.move(-1)
 		case p.km.matches(msg, p.km.Down) || key.Text == "j":
-			if p.group == groupEncoder && p.encCur < len(encoderChoices)-1 {
-				p.encCur++
-			} else if p.group == groupPreset && p.preCur < len(presetChoices)-1 {
-				p.preCur++
+			p.move(1)
+		case key.Text >= "1" && key.Text <= "4":
+			if p.jump(int(key.Text[0] - '1')) {
+				return p, nil
 			}
 		case p.km.matches(msg, p.km.Enter):
 			p.ctx.Encoder = encoderChoices[p.encCur].Value
@@ -95,69 +93,73 @@ func (p *encoderPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	return p, nil
 }
 
+// move steps the cursor within the focused group.
+func (p *encoderPage) move(delta int) {
+	if p.group == groupEncoder {
+		if n := p.encCur + delta; n >= 0 && n < len(encoderChoices) {
+			p.encCur = n
+		}
+		return
+	}
+	if n := p.preCur + delta; n >= 0 && n < len(presetChoices) {
+		p.preCur = n
+	}
+}
+
+// jump selects item n in the focused group; false when out of range.
+func (p *encoderPage) jump(n int) bool {
+	if p.group == groupEncoder {
+		if n < len(encoderChoices) {
+			p.encCur = n
+			return true
+		}
+		return false
+	}
+	if n < len(presetChoices) {
+		p.preCur = n
+		return true
+	}
+	return false
+}
+
 func (p *encoderPage) View() tea.View {
 	width := p.ctx.Width
 	if width < 60 {
 		width = 80
 	}
 
-	var encItems []components.MenuItem
-	for i := range encoderChoices {
-		encItems = append(encItems, components.MenuItem{
-			Label:       encoderChoices[i].Label,
-			Description: encoderDescs[i],
-		})
-	}
-	var preItems []components.MenuItem
-	for i := range presetChoices {
-		preItems = append(preItems, components.MenuItem{
-			Label:       presetChoices[i],
-			Description: presetDescs[i],
-		})
-	}
-
-	// Only the focused group gets the `▶` cursor; the other shows `○`.
+	var b strings.Builder
+	b.WriteString(components.Banner(appTitle(), "Step 3/4  Encoder & Preset", width))
+	b.WriteString("\n\n")
+	b.WriteString(render.SectionTitle("Encoder"))
+	b.WriteString("\n")
 	encCursor := -1
-	preCursor := -1
 	if p.group == groupEncoder {
 		encCursor = p.encCur
-	} else {
+	}
+	for i := range encoderChoices {
+		b.WriteString(render.MenuRow(encCursor, i, fmt.Sprint(i+1), encoderChoices[i].Label, encoderDescs[i]))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(render.SectionTitle("Preset"))
+	b.WriteString("\n")
+	preCursor := -1
+	if p.group == groupPreset {
 		preCursor = p.preCur
 	}
-
-	encCard := components.Card(render.IconEncode, "Encoder", []string{
-		"",
-		components.Menu(encItems, encCursor, width),
-		"",
-	}, width)
-	preCard := components.Card(render.IconOutput, "Preset", []string{
-		"",
-		components.Menu(preItems, preCursor, width),
-		"",
-	}, width)
-
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		components.Header("Encoder", render.IconSystem, p.hardwareText(), render.Primary, "", width),
-		components.Separator(width),
-		"",
-		encCard,
-		"",
-		preCard,
-		"",
-		components.KeyHint([]components.HintPair{
-			{Key: "↑/↓", Desc: "select"},
-			{Key: "tab", Desc: "switch group"},
-			{Key: "enter", Desc: "next"},
-			{Key: "esc", Desc: "back"},
-		}),
-	)
-
-	return tea.NewView(body)
-}
-
-func (p *encoderPage) hardwareText() string {
-	if p.ctx.Caps != nil && p.ctx.Caps.GPUName != "" {
-		return p.ctx.Caps.GPUName
+	for i := range presetChoices {
+		b.WriteString(render.MenuRow(preCursor, i, fmt.Sprint(i+1), presetChoices[i], presetDescs[i]))
+		b.WriteString("\n")
 	}
-	return "VideoToolbox"
+	b.WriteString("\n")
+	b.WriteString(components.KeyHint([]components.HintPair{
+		{Key: "↑/↓", Desc: "navigate"},
+		{Key: "tab", Desc: "switch"},
+		{Key: "1-4", Desc: "jump"},
+		{Key: "enter", Desc: "confirm"},
+		{Key: "esc", Desc: "back"},
+	}))
+
+	return tea.NewView(b.String())
 }

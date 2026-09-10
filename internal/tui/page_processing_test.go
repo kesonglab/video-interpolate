@@ -100,19 +100,24 @@ func TestProcessing_BatchDone(t *testing.T) {
 }
 
 func TestProcessing_View(t *testing.T) {
-	p := NewProcessingPage(newProcessingCtx()).(*processingState)
+	ctx := newProcessingCtx()
+	ctx.Files = []string{"/tmp/clip1.mp4", "/tmp/clip2.mp4"}
+	p := NewProcessingPage(ctx).(*processingState)
 	feed(p,
 		pipeline.Event{JobID: "j1", Type: pipeline.EventJobAdded},
+		pipeline.Event{JobID: "j2", Type: pipeline.EventJobAdded},
 		pipeline.Event{JobID: "j1", Type: pipeline.EventJobStarted},
 		pipeline.Event{JobID: "j1", Type: pipeline.EventStageChange, Stage: pipeline.StageProbing, Message: "1920x1080, 24fps, 00:02:15"},
-		pipeline.Event{JobID: "j1", Type: pipeline.EventProgress, Stage: pipeline.StageInterpolating, Progress: 50, FPS: 8.4},
-		pipeline.Event{JobID: "j1", Type: pipeline.EventProgress, Stage: pipeline.StageEncoding, Progress: 25},
+		pipeline.Event{JobID: "j1", Type: pipeline.EventProgress, Stage: pipeline.StageInterpolating, Progress: 50, FPS: 8.4, ETA: 84 * time.Second},
 	)
 
-	content := p.View().Content
-	for _, want := range []string{"Interpolate", "Source", "RIFE", "Encode", "System", "1920 × 1080", "x4", "Stage", "Trend", "CPU", "Mem", "GPU", "█", "░"} {
+	content := stripViewANSI(p.View().Content)
+	for _, want := range []string{
+		"👑 vif", "批量进度", "clip1.mp4", "clip2.mp4", "waiting",
+		"█", "░", "speed", "eta", "8.4 fps", "50.0%",
+	} {
 		if !strings.Contains(content, want) {
-			t.Errorf("view missing %q in:\n%s", want, stripViewANSI(content))
+			t.Errorf("view missing %q in:\n%s", want, content)
 		}
 	}
 }
@@ -145,6 +150,23 @@ func TestProcessing_PopupQuit(t *testing.T) {
 	}
 	if _, ok := quitCmd().(tea.QuitMsg); !ok {
 		t.Fatalf("quit cmd returned %T, want tea.QuitMsg", quitCmd())
+	}
+}
+
+func TestSparkline(t *testing.T) {
+	if got := sparkline(nil, 8); got != "" {
+		t.Errorf("empty = %q, want empty", got)
+	}
+	if got := sparkline([]float64{5}, 8); got != "▁" {
+		t.Errorf("single = %q, want ▁", got)
+	}
+	got := sparkline([]float64{1, 2, 3, 4, 5, 6, 7, 8}, 8)
+	if got != "▁▂▃▄▅▆▇█" {
+		t.Errorf("ramp = %q", got)
+	}
+	// width cap keeps only the newest samples
+	if got := sparkline([]float64{1, 2, 3, 4}, 2); len([]rune(got)) != 2 {
+		t.Errorf("cap = %q, want 2 runes", got)
 	}
 }
 

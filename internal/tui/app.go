@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/kesonglab/video-interpolate/internal/config"
 	"github.com/kesonglab/video-interpolate/internal/pipeline"
+	"github.com/kesonglab/video-interpolate/internal/render"
 	"github.com/kesonglab/video-interpolate/internal/system"
 )
 
@@ -27,18 +28,16 @@ const (
 // for tests; when nil the app runs the real orchestrator.
 type StartFunc func(ctx *SharedContext) tea.Cmd
 
-// App is the top-level model owning the page stack, the mascot clock and the
-// shared context.
+// App is the top-level model owning the page stack and the shared context.
 type App struct {
-	page        pageID
-	pages       map[pageID]Page
-	ctx         *SharedContext
-	km          keymap
-	quit        bool
-	mascotFrame int
-	width       int
-	height      int
-	Start       StartFunc
+	page   pageID
+	pages  map[pageID]Page
+	ctx    *SharedContext
+	km     keymap
+	quit   bool
+	width  int
+	height int
+	Start  StartFunc
 }
 
 func New(cfg *config.Config, caps *system.Capabilities) *App {
@@ -62,13 +61,13 @@ func (a *App) buildPages() {
 }
 
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(a.pages[a.page].Init(), mascotTick())
+	return tea.Batch(a.pages[a.page].Init(), toastTick())
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	// Global handlers first: quit, resize, mascot clock.
+	// Global handlers first: quit, resize, toast clock.
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
@@ -77,11 +76,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.QuitMsg:
 		a.quit = true
 		return a, tea.Quit
-	case tickMsg:
-		a.mascotFrame = (a.mascotFrame + 1) % len(reelyFrames)
-		a.ctx.MascotFrame = a.mascotFrame
-		return a, mascotTick()
+	case toastTickMsg:
+		if a.ctx.Toast != "" && time.Now().After(a.ctx.ToastUntil) {
+			a.ctx.Toast = ""
+		}
+		return a, toastTick()
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			a.quit = true
+			return a, tea.Quit
+		}
 		// Processing owns `q` so it can ask before quitting.
 		if a.page != pageProcessing && a.km.matches(msg, a.km.Quit) {
 			a.quit = true
@@ -159,21 +163,27 @@ func (a *App) reset() {
 	a.ctx.Orch = nil
 	a.ctx.CancelRun = nil
 	a.ctx.Summary = BatchSummary{}
+	a.ctx.Toast = ""
 	a.page = pageWelcome
 	a.buildPages()
 }
 
 func (a *App) View() tea.View {
-	v := tea.NewView(a.pages[a.page].View().Content)
+	content := a.pages[a.page].View().Content
+	// Toast lives at app level so every page gets it for free.
+	if a.ctx.Toast != "" && time.Now().Before(a.ctx.ToastUntil) {
+		content += "\n\n" + render.Toast(a.ctx.Toast)
+	}
+	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
 
-// tickMsg drives the mascot animation.
-type tickMsg time.Time
+// toastTickMsg drives the toast expiry clock.
+type toastTickMsg time.Time
 
-func mascotTick() tea.Cmd {
-	return tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg { return tickMsg(t) })
+func toastTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return toastTickMsg(t) })
 }
 
 // gotoMsg switches pages; pages return it via Goto.

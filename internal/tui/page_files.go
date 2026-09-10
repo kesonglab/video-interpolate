@@ -11,7 +11,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/kesonglab/video-interpolate/internal/probe"
 	"github.com/kesonglab/video-interpolate/internal/render"
 	"github.com/kesonglab/video-interpolate/internal/tui/components"
@@ -31,6 +30,7 @@ type filePickerPage struct {
 	km     keymap
 	ti     textinput.Model
 	files  []addedFile
+	cursor int
 	notice string
 }
 
@@ -66,12 +66,18 @@ func (p *filePickerPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 				p.syncCtx()
 				return p, Goto(pageMultiplier)
 			}
+		case p.km.matches(msg, p.km.Up):
+			if p.cursor > 0 {
+				p.cursor--
+			}
+		case p.km.matches(msg, p.km.Down):
+			if p.cursor < len(p.files)-1 {
+				p.cursor++
+			}
 		case p.km.matches(msg, p.km.Paste) && p.ti.Value() == "":
 			return p, p.paste()
 		case p.km.matches(msg, p.km.Back) && p.ti.Value() == "":
-			if n := len(p.files); n > 0 {
-				p.files = p.files[:n-1]
-			}
+			p.removeCursor()
 		default:
 			if key.Code == 'v' && key.Mod == tea.ModCtrl {
 				return p, p.paste()
@@ -93,6 +99,17 @@ func (p *filePickerPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	return p, cmd
 }
 
+// removeCursor drops the highlighted file and clamps the cursor.
+func (p *filePickerPage) removeCursor() {
+	if len(p.files) == 0 {
+		return
+	}
+	p.files = append(p.files[:p.cursor], p.files[p.cursor+1:]...)
+	if p.cursor >= len(p.files) && p.cursor > 0 {
+		p.cursor--
+	}
+}
+
 func (p *filePickerPage) paste() tea.Cmd {
 	return func() tea.Msg { return readClipboard() }
 }
@@ -108,7 +125,7 @@ func (p *filePickerPage) addFromText(text string) ([]addedFile, string) {
 			out = append(out, addedFile{Path: path, Info: info, Found: true})
 		}
 		if len(out) == 0 {
-			return nil, render.Warn.Render("⚠ not found: " + line)
+			return nil, render.Yellow.Render("⚠ not found: " + line)
 		}
 	}
 	return out, ""
@@ -130,33 +147,30 @@ func (p *filePickerPage) View() tea.View {
 	if width < 60 {
 		width = 80
 	}
-	p.ti.SetWidth(width - 4)
+	p.ti.SetWidth(width - 6)
+
+	banner := components.Banner(appTitle(), authorLine, width)
+	box := components.Box(p.ti.View(), width-2)
 
 	var lines []string
 	if len(p.files) == 0 {
-		lines = append(lines, render.Subtle.Render("no files yet — drag, type or paste a path"))
+		lines = append(lines, "  "+render.Dim.Render("no files yet — drag, type or paste a path"))
 	}
-	for _, f := range p.files {
-		mark := render.Subtle.Render(render.IconRadioOff)
-		if f.Found {
-			mark = render.OK.Render(render.IconSuccess)
+	for i, f := range p.files {
+		marker := "  "
+		if i == p.cursor {
+			marker = render.Green.Render("▶ ")
 		}
-		lines = append(lines, "  "+mark+" "+filepath.Base(f.Path)+"  "+render.Subtle.Render(f.Info))
+		mark := render.Dim.Render(render.IconFailed)
+		if f.Found {
+			mark = render.Green.Render(render.IconDone)
+		}
+		lines = append(lines, marker+mark+" "+filepath.Base(f.Path)+"  "+render.Dim.Render(f.Info))
 	}
-	listCard := components.Card(render.IconSource, "Sources", lines, width)
 
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		components.Header("FilePicker", render.IconSystem, p.hardwareText(), render.Primary, "", width),
-		components.Separator(width),
-		"",
-		p.ti.View(),
-		"",
-		listCard,
-		"",
-	)
-
+	body := banner + "\n\n" + box + "\n\n" + strings.Join(lines, "\n")
 	if p.notice != "" {
-		body += "\n" + p.notice
+		body += "\n\n" + p.notice
 	}
 	body += "\n\n" + components.KeyHint([]components.HintPair{
 		{Key: "enter", Desc: "add / next"},
@@ -166,13 +180,6 @@ func (p *filePickerPage) View() tea.View {
 	})
 
 	return tea.NewView(body)
-}
-
-func (p *filePickerPage) hardwareText() string {
-	if p.ctx.Caps != nil && p.ctx.Caps.GPUName != "" {
-		return p.ctx.Caps.GPUName
-	}
-	return "VideoToolbox"
 }
 
 // expandInput splits a drag line on spaces, rejoining escaped `\ ` pairs.

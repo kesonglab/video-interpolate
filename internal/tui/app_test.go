@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/kesonglab/video-interpolate/internal/config"
@@ -83,11 +84,11 @@ func TestPageViews(t *testing.T) {
 		page pageID
 		want []string
 	}{
-		{pageWelcome, []string{"Interpolate", "RIFE frame interpolation"}},
-		{pageFiles, []string{"FilePicker", "Sources"}},
-		{pageMultiplier, []string{"Multiplier", "x2", "x4", "x8"}},
-		{pageEncoder, []string{"Encoder", "VideoToolbox", "libx264", "Preset"}},
-		{pageConfirm, []string{"Confirm", "Encoder", "Output"}},
+		{pageWelcome, []string{"👑 vif", "欢迎使用 vif", "开始"}},
+		{pageFiles, []string{"👑 vif", "no files yet", "esc"}},
+		{pageMultiplier, []string{"x2", "x4", "x8", "recommended"}},
+		{pageEncoder, []string{"Encoder", "VideoToolbox h264", "libx264", "Preset"}},
+		{pageConfirm, []string{"Setup", "Encoder", "Output"}},
 	}
 	for _, c := range cases {
 		page := a.pages[c.page]
@@ -101,5 +102,45 @@ func TestPageViews(t *testing.T) {
 				t.Errorf("page %d missing %q in:\n%s", c.page, want, content)
 			}
 		}
+	}
+}
+
+// TestPageViewsQueenStyle checks every screen carries the queen banner and
+// none of the old Mole glyphs leaked through.
+func TestPageViewsQueenStyle(t *testing.T) {
+	a := newTestApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	mole := []string{"◉", "▦", "◈", "⚙", "Mole"}
+	for id := pageWelcome; id <= pageSummary; id++ {
+		page := a.pages[id]
+		page.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+		content := stripViewANSI(page.View().Content)
+		for _, want := range []string{"━", "👑", "vif"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("page %d missing %q in:\n%s", id, want, content)
+			}
+		}
+		for _, bad := range mole {
+			if strings.Contains(content, bad) {
+				t.Errorf("page %d still has Mole residue %q", id, bad)
+			}
+		}
+	}
+}
+
+// TestAppToast checks the app-level toast renders while it is fresh.
+func TestAppToast(t *testing.T) {
+	a := newTestApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	a.ctx.AddToast("clip added")
+
+	if !strings.Contains(a.View().Content, "clip added") {
+		t.Fatal("toast text not rendered")
+	}
+
+	a.ctx.ToastUntil = time.Now().Add(-time.Second)
+	if strings.Contains(a.View().Content, "clip added") {
+		t.Fatal("expired toast should not render")
 	}
 }

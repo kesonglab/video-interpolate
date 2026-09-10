@@ -3,14 +3,12 @@ package tui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/kesonglab/video-interpolate/internal/pipeline"
@@ -18,12 +16,7 @@ import (
 	"github.com/kesonglab/video-interpolate/internal/tui/components"
 )
 
-const (
-	// splitWidth is where the dashboard switches from stacked to two columns.
-	splitWidth = 80
-	// fpsHistory is how many progress samples the sparkline keeps.
-	fpsHistory = 30
-)
+const fpsHistory = 30
 
 // jobState is the TUI-side view of one pipeline job.
 type jobState struct {
@@ -43,17 +36,14 @@ type processingState struct {
 	currentJobID string
 	jobs         map[string]*jobState
 	jobOrder     []string
+	batchStart   time.Time
 
 	rifeFPSHist []float64
 
-	cpuPct float64
-	memPct float64
-	gpuPct float64
-
-	popup      Popup
-	showMascot bool
-
+	popup        Popup
+	sp           spinner.Model
 	rifeProgress float64
+	rifeDone     bool
 	rifeStage    string
 	rifeETA      time.Duration
 	rifeSpeed    float64
@@ -62,7 +52,6 @@ type processingState struct {
 	encodeStage    string
 	encodeETA      time.Duration
 	encodeSize     int64
-	encodeBitrate  float64
 
 	chunkCurrent int
 	chunkTotal   int
@@ -79,7 +68,16 @@ func NewProcessingPage(ctx *SharedContext) Page {
 		ctx:       ctx,
 		jobs:      map[string]*jobState{},
 		rifeStage: "waiting",
+		sp:        newSpinner(),
 	}
+}
+
+// newSpinner builds the queen dot spinner tinted blue.
+func newSpinner() spinner.Model {
+	return spinner.New(
+		spinner.WithSpinner(spinner.Dot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(render.ColorBlue)),
+	)
 }
 
 func (p *processingState) Init() tea.Cmd {
@@ -89,7 +87,7 @@ func (p *processingState) Init() tea.Cmd {
 			p.sourceFPS = fps
 		}
 	}
-	return tea.Batch(waitForEvent(p.ctx.EventsCh), systemStatsTick())
+	return tea.Batch(waitForEvent(p.ctx.EventsCh), p.sp.Tick)
 }
 
 // waitForEvent reads one pipeline event; a closed channel means the run is over.
@@ -112,11 +110,10 @@ func (p *processingState) Update(msg tea.Msg) (Page, tea.Cmd) {
 		return p, p.handleEvent(pipeline.Event(msg))
 	case popupResultMsg:
 		return p, p.handlePopupResult(msg)
-	case systemStatsTickMsg:
-		return p, tea.Batch(readSystemStatsCmd(), systemStatsTick())
-	case systemStatsMsg:
-		p.cpuPct, p.memPct, p.gpuPct = msg.CPU, msg.Mem, msg.GPU
-		return p, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		p.sp, cmd = p.sp.Update(msg)
+		return p, tea.Batch(cmd, waitForEvent(p.ctx.EventsCh))
 	case tea.KeyMsg:
 		return p, p.handleKey(msg)
 	}
@@ -132,18 +129,16 @@ func (p *processingState) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.Key()
 	switch key.Text {
 	case "q":
-		p.popup = NewPopup("quit", "Quit", "Quit after the current file?", []string{"Cancel", "Quit"}, render.Warn).Open()
+		p.popup = NewPopup("quit", "Quit", "Quit after the current file?", []string{"Cancel", "Quit"}, render.Yellow).Open()
 	case "c":
-		p.popup = NewPopup("cancel", "Cancel job", "Cancel the current job?", []string{"No", "Yes"}, render.Danger).Open()
+		p.popup = NewPopup("cancel", "Cancel job", "Cancel the current job?", []string{"No", "Yes"}, render.Red).Open()
 	case "n":
-		p.popup = NewPopup("skip", "Skip file", "Skip the current file?", []string{"No", "Yes"}, render.Warn).Open()
-	case "m":
-		p.showMascot = !p.showMascot
+		p.popup = NewPopup("skip", "Skip file", "Skip the current file?", []string{"No", "Yes"}, render.Yellow).Open()
 	case "p":
 		// TODO: pause/resume needs orchestrator support
 	}
 	if key.Code == tea.KeyEsc {
-		p.popup = NewPopup("quit", "Quit", "Quit after the current file?", []string{"Cancel", "Quit"}, render.Warn).Open()
+		p.popup = NewPopup("quit", "Quit", "Quit after the current file?", []string{"Cancel", "Quit"}, render.Yellow).Open()
 	}
 	return nil
 }
@@ -190,6 +185,7 @@ func (p *processingState) handleEvent(ev pipeline.Event) tea.Cmd {
 		p.currentJobID = ev.JobID
 		p.rifeProgress, p.encodeProgress = 0, 0
 		p.rifeETA, p.encodeETA = 0, 0
+		p.rifeDone = false
 		p.rifeFPSHist = nil
 		p.chunkCurrent, p.chunkTotal = 0, 0
 	case pipeline.EventStageChange:
@@ -221,6 +217,9 @@ func (p *processingState) handleEvent(ev pipeline.Event) tea.Cmd {
 func (p *processingState) addJob(id string) {
 	if _, ok := p.jobs[id]; ok {
 		return
+	}
+	if p.batchStart.IsZero() {
+		p.batchStart = time.Now()
 	}
 	input := ""
 	if i := len(p.jobOrder); i < len(p.ctx.Files) {
@@ -263,6 +262,7 @@ func (p *processingState) applyStage(ev pipeline.Event) {
 	case pipeline.StageInterpolating:
 		p.rifeStage = "generating frames" + p.chunkLabel()
 	case pipeline.StageEncoding:
+		p.rifeDone = true
 		p.encodeStage = "writing video" + p.chunkLabel()
 	}
 }
@@ -303,9 +303,9 @@ func (p *processingState) applyProgress(ev pipeline.Event) {
 		p.encodeStage = "writing video" + p.chunkLabel()
 		p.encodeProgress = ev.Progress
 		p.encodeETA = ev.ETA
-		p.encodeBitrate = nominalBitrateMbps(p.ctx.Quality)
+		bitrate := nominalBitrateMbps(p.ctx.Quality)
 		outDur := p.sourceDur * time.Duration(p.ctx.Multiplier)
-		total := int64(p.encodeBitrate / 8 * 1e6 * outDur.Seconds())
+		total := int64(bitrate / 8 * 1e6 * outDur.Seconds())
 		p.encodeSize = int64(float64(total) * ev.Progress / 100)
 	}
 }
@@ -376,147 +376,127 @@ func (p *processingState) summary() BatchSummary {
 
 func (p *processingState) View() tea.View {
 	width := p.ctx.Width
-	if width < 40 {
+	if width < 60 {
 		width = 80
 	}
-	height := p.ctx.Height
-	if height < 10 {
-		height = 24
+
+	banner := components.Banner(appTitle(), authorLine, width)
+	var rows []string
+	for _, id := range p.jobOrder {
+		if j := p.jobs[id]; j != nil {
+			rows = append(rows, p.jobRow(j))
+		}
 	}
 
-	cw := (width - 4) / 2
-	if cw < 24 {
-		cw = 24
-	}
+	batch := p.batchStats()
+	batchBar := render.ProgressBar(float64(batch.pct))
+	batchLine := fmt.Sprintf("  %s  %s  %d%%  (%d/%d)",
+		render.Dim.Render("批量进度"), batchBar, batch.pct, batch.done, batch.total)
+	batchLine += "\n  " + render.Dim.Render("  elapsed "+formatDuration(batch.elapsed)+
+		" | ETA "+formatDuration(batch.eta)+" | press q to abort")
 
-	sourceCard := components.Card(render.IconSource, "Source", p.sourceLines(), cw)
-	outputCard := components.Card(render.IconOutput, "Output", p.outputLines(), cw)
-	rifeCard := components.Card(render.IconRife, "RIFE", p.rifeLines(), cw)
-	encodeCard := components.Card(render.IconEncode, "Encode", p.encodeLines(), cw)
-	sysCard := components.Card(render.IconSystem, "System", p.systemLines(), cw)
-
-	left := lipgloss.JoinVertical(lipgloss.Left, sourceCard, "", outputCard)
-	right := lipgloss.JoinVertical(lipgloss.Left, rifeCard, "", encodeCard, "", sysCard)
-
-	var cols string
-	if width >= splitWidth {
-		cols = lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
-	} else {
-		cols = lipgloss.JoinVertical(lipgloss.Left, left, "", right)
-	}
-
-	parts := []string{
-		p.header(width),
-		components.Separator(width),
-		"",
-		cols,
-		"",
-	}
-	if p.showMascot {
-		parts = append(parts, mascot(p.ctx.MascotFrame, render.Primary), "")
-	}
-	parts = append(parts,
-		components.Separator(width),
+	body := banner + "\n\n" +
+		strings.Join(rows, "\n") + "\n\n" +
+		batchLine + "\n\n" +
 		components.KeyHint([]components.HintPair{
 			{Key: "c", Desc: "cancel current"},
 			{Key: "n", Desc: "skip"},
 			{Key: "p", Desc: "pause"},
-			{Key: "m", Desc: "toggle mascot"},
 			{Key: "q", Desc: "quit"},
-		}),
-	)
+		})
 
-	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	if p.popup.Active() {
-		return tea.NewView(p.popup.View(body, width, height))
+		return tea.NewView(p.popup.View(body, width, p.ctx.Height))
 	}
 	return tea.NewView(body)
 }
 
-func (p *processingState) header(width int) string {
-	done := 0
+// jobRow renders one job per queen's taskRow: path line + indented info.
+func (p *processingState) jobRow(j *jobState) string {
+	switch j.Status {
+	case "pending":
+		return "  " + render.Dim.Render("⏳") + " " + shortPath(j.InputPath) +
+			"\n      " + render.Dim.Render("waiting")
+	case "active":
+		sp := p.sp.View()
+		pct := p.curPercent()
+		dl := p.rifeStage
+		if p.encodeSize > 0 {
+			dl = humanBytes(p.encodeSize)
+		}
+		speed := fmt.Sprintf("%.1f fps", p.rifeSpeed)
+		if p.rifeSpeed <= 0 {
+			speed = "—"
+		}
+		eta := formatDuration(p.curETA())
+		info := fmt.Sprintf("%s %5.1f%% %-11s | %s %-11s | %s %8s",
+			render.ProgressBar(pct),
+			pct,
+			render.Gray.Render(render.PadW(dl, 11)),
+			"speed",
+			render.Gray.Render(render.PadW(speed, 11)),
+			"eta",
+			render.Gray.Render(render.PadW(eta, 8)),
+		)
+		if trend := sparkline(p.rifeFPSHist, 8); trend != "" {
+			info += "  " + render.Dim.Render(trend)
+		}
+		return "  " + sp + " " + shortPath(j.InputPath) + "\n      " + info
+	case "done":
+		return render.StatusDone(shortPath(j.OutputPath))
+	case "failed":
+		line := render.StatusFailed(shortPath(j.InputPath))
+		if j.Error != "" {
+			line += "\n      " + render.Red.Render(j.Error)
+		}
+		return line
+	default: // skipped
+		return render.Dim.Render("⚠") + " " + shortPath(j.InputPath) +
+			"\n      " + render.Dim.Render("skipped")
+	}
+}
+
+// curPercent is the progress of whatever stage is live.
+func (p *processingState) curPercent() float64 {
+	if p.rifeDone || p.encodeProgress > 0 {
+		return p.encodeProgress
+	}
+	return p.rifeProgress
+}
+
+// curETA is the ETA of whatever stage is live.
+func (p *processingState) curETA() time.Duration {
+	if p.rifeDone || p.encodeProgress > 0 {
+		return p.encodeETA
+	}
+	return p.rifeETA
+}
+
+type batchStats struct {
+	done    int
+	total   int
+	pct     int
+	elapsed time.Duration
+	eta     time.Duration
+}
+
+func (p *processingState) batchStats() batchStats {
+	s := batchStats{total: len(p.jobOrder)}
 	for _, id := range p.jobOrder {
 		if j := p.jobs[id]; j != nil && j.Status != "pending" && j.Status != "active" {
-			done++
+			s.done++
 		}
 	}
-	style := render.Warn
-	if len(p.jobOrder) > 0 && done == len(p.jobOrder) {
-		style = render.OK
+	if s.total > 0 {
+		s.pct = s.done * 100 / s.total
 	}
-	status := fmt.Sprintf("%d/%d", done, len(p.jobOrder))
-	return components.Header("Interpolate", "●", "Batch "+status, style, p.hardwareText(), width)
-}
-
-func (p *processingState) sourceLines() []string {
-	file := "—"
-	if j := p.currentJob(); j != nil {
-		file = filepath.Base(j.InputPath)
+	if !p.batchStart.IsZero() {
+		s.elapsed = time.Since(p.batchStart)
+		if s.done > 0 && s.total > s.done {
+			s.eta = time.Duration(float64(s.elapsed) / float64(s.done) * float64(s.total-s.done))
+		}
 	}
-	res := "—"
-	if p.sourceWidth > 0 {
-		res = fmt.Sprintf("%d × %d", p.sourceWidth, p.sourceHeight)
-	}
-	fps := "—"
-	if p.sourceFPS > 0 {
-		fps = fmt.Sprintf("%.2f", p.sourceFPS)
-	}
-	return []string{
-		row("File", file),
-		row("Res", res),
-		row("FPS", fps),
-		row("Dur", formatDuration(p.sourceDur)),
-		row("Frames", fmt.Sprintf("%d", p.sourceFrames)),
-	}
-}
-
-func (p *processingState) outputLines() []string {
-	target := "—"
-	if p.ctx.SourceFPS > 0 {
-		target = fmt.Sprintf("%.0f fps", p.ctx.SourceFPS*float64(p.ctx.Multiplier))
-	}
-	out := "—"
-	if j := p.currentJob(); j != nil && j.OutputPath != "" {
-		out = j.OutputPath
-	}
-	return []string{
-		row("Mult", fmt.Sprintf("x%d", p.ctx.Multiplier)),
-		row("Target", target),
-		row("Enc", encoderLabel(p.ctx.Encoder)),
-		row("Preset", p.ctx.Quality),
-		row("Out", out),
-	}
-}
-
-func (p *processingState) rifeLines() []string {
-	return []string{
-		row("Stage", p.rifeStage),
-		row("Prog", fmt.Sprintf("%s  %5.1f%%", render.ProgressBar(p.rifeProgress), p.rifeProgress)),
-		row("ETA", formatDuration(p.rifeETA)),
-		row("Speed", fmt.Sprintf("%.1f fps", p.rifeSpeed)),
-		row("Trend", normalizedSpark(p.rifeFPSHist, 16)),
-	}
-}
-
-func (p *processingState) encodeLines() []string {
-	out := "—"
-	if p.encodeSize > 0 {
-		out = fmt.Sprintf("%s · %.1f Mb/s", humanBytes(p.encodeSize), p.encodeBitrate)
-	}
-	return []string{
-		row("Stage", p.encodeStage),
-		row("Prog", fmt.Sprintf("%s  %5.1f%%", render.ProgressBar(p.encodeProgress), p.encodeProgress)),
-		row("ETA", formatDuration(p.encodeETA)),
-		row("Out", out),
-	}
-}
-
-func (p *processingState) systemLines() []string {
-	return []string{
-		row("CPU", fmt.Sprintf("%s  %5.1f%%", render.ProgressBar(p.cpuPct), p.cpuPct)),
-		row("Mem", fmt.Sprintf("%s  %5.1f%%", render.ProgressBar(p.memPct), p.memPct)),
-		row("GPU", fmt.Sprintf("%s  %d%%", render.MiniBar(p.gpuPct), int(p.gpuPct))),
-	}
+	return s
 }
 
 func (p *processingState) currentJob() *jobState {
@@ -526,20 +506,47 @@ func (p *processingState) currentJob() *jobState {
 	return p.jobs[p.currentJobID]
 }
 
-func (p *processingState) hardwareText() string {
-	hw := "VideoToolbox"
-	if p.ctx.Caps != nil && p.ctx.Caps.GPUName != "" {
-		hw = p.ctx.Caps.GPUName
+// shortPath keeps the path readable, queen shortURL style.
+func shortPath(p string) string {
+	if len(p) <= 52 {
+		return p
 	}
-	if p.ctx.Encoder != "" {
-		return hw + " · " + encoderLabel(p.ctx.Encoder)
+	// keep the tail (filename) intact
+	base := filepath.Base(p)
+	tail := len(base)
+	if tail > 30 {
+		tail = 30
 	}
-	return hw
+	return p[:52-tail] + "…" + base[len(base)-tail:]
 }
 
-// row formats a label/value pair with a fixed label column.
-func row(label, value string) string {
-	return fmt.Sprintf("%-6s %s", label, value)
+// sparkline draws the last `width` fps samples as block glyphs.
+func sparkline(samples []float64, width int) string {
+	if len(samples) == 0 {
+		return ""
+	}
+	if len(samples) > width {
+		samples = samples[len(samples)-width:]
+	}
+	lo, hi := samples[0], samples[0]
+	for _, v := range samples {
+		if v < lo {
+			lo = v
+		}
+		if v > hi {
+			hi = v
+		}
+	}
+	blocks := []rune("▁▂▃▄▅▆▇█")
+	var b strings.Builder
+	for _, v := range samples {
+		idx := 0
+		if hi > lo {
+			idx = int((v - lo) / (hi - lo) * float64(len(blocks)-1))
+		}
+		b.WriteRune(blocks[idx])
+	}
+	return b.String()
 }
 
 // encoderLabel turns a config encoder value into its UI label.
@@ -616,30 +623,6 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// normalizedSpark scales samples against their max, keeping the newest width.
-func normalizedSpark(data []float64, width int) string {
-	if len(data) == 0 {
-		return ""
-	}
-	if len(data) > width {
-		data = data[len(data)-width:]
-	}
-	max := 0.0
-	for _, v := range data {
-		if v > max {
-			max = v
-		}
-	}
-	if max <= 0 {
-		return render.Sparkline(data, width)
-	}
-	norm := make([]float64, len(data))
-	for i, v := range data {
-		norm[i] = v / max
-	}
-	return render.Sparkline(norm, width)
-}
-
 // nominalBitrateMbps is a rough per-preset output bitrate for the size estimate.
 func nominalBitrateMbps(quality string) float64 {
 	switch quality {
@@ -678,85 +661,4 @@ func expandHomeDir(p string) string {
 		return filepath.Join(home, strings.TrimPrefix(p, "~/"))
 	}
 	return p
-}
-
-// systemStatsTick refreshes stats every two seconds.
-func systemStatsTick() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return systemStatsTickMsg(t) })
-}
-
-func readSystemStatsCmd() tea.Cmd {
-	return func() tea.Msg {
-		cpu, mem, gpu := readSystemStats()
-		return systemStatsMsg{CPU: cpu, Mem: mem, GPU: gpu}
-	}
-}
-
-// readSystemStats samples whole-machine CPU/RSS percentages. GPU stays 0 until
-// Phase 3 wires up Metal counters.
-func readSystemStats() (cpu, mem, gpu float64) {
-	return readCPUPercent(), readMemPercent(), readGPUPercent()
-}
-
-func readCPUPercent() float64 {
-	out, err := exec.Command("ps", "-A", "-o", "%cpu=").Output()
-	if err != nil {
-		return 0
-	}
-	sum := 0.0
-	for _, f := range strings.Fields(string(out)) {
-		if v, err := strconv.ParseFloat(f, 64); err == nil {
-			sum += v
-		}
-	}
-	n := runtime.NumCPU()
-	if n < 1 {
-		n = 1
-	}
-	pct := sum / float64(n)
-	if pct > 100 {
-		pct = 100
-	}
-	return pct
-}
-
-func readMemPercent() float64 {
-	totalOut, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
-	if err != nil {
-		return 0
-	}
-	total, err := strconv.ParseFloat(strings.TrimSpace(string(totalOut)), 64)
-	if err != nil || total <= 0 {
-		return 0
-	}
-	rssOut, err := exec.Command("ps", "-A", "-o", "rss=").Output()
-	if err != nil {
-		return 0
-	}
-	sumKB := 0.0
-	for _, f := range strings.Fields(string(rssOut)) {
-		if v, err := strconv.ParseFloat(f, 64); err == nil {
-			sumKB += v
-		}
-	}
-	pct := sumKB * 1024 / total * 100
-	if pct > 100 {
-		pct = 100
-	}
-	return pct
-}
-
-var gpuUtilRe = regexp.MustCompile(`"Device Utilization %"=(\d+)`)
-
-func readGPUPercent() float64 {
-	out, err := exec.Command("ioreg", "-r", "-c", "IOAccelerator", "-d", "1").Output()
-	if err != nil {
-		return 0
-	}
-	m := gpuUtilRe.FindSubmatch(out)
-	if len(m) < 2 {
-		return 0
-	}
-	v, _ := strconv.ParseFloat(string(m[1]), 64)
-	return v
 }

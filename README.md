@@ -1,12 +1,12 @@
 # video-interpolate (vif)
 
-用 RIFE 做视频补帧的命令行工具，把 30fps 视频补成 60/120/240fps。macOS 原生，解码编码都走 VideoToolbox，跑起来是个 Mole 风格的 TUI。
+用 RIFE 做视频补帧的命令行工具，把 30fps 视频补成 60/120/240fps。macOS 原生，解码编码都走 VideoToolbox，跑起来是个 queen 风格的 TUI。
 
 ## Features
 
 - x2 / x4 / x8 补帧倍率
 - VideoToolbox 硬编（hevc / h264），不支持时自动回退软编
-- Mole 风格 TUI：任务队列、进度条、实时帧率
+- queen 风格 TUI：任务队列、进度条、实时帧率
 - 跳过已存在的输出，断点续跑
 - 多任务并行 + 长视频分块处理
 - Watch 模式自动处理新文件
@@ -79,54 +79,49 @@ vif          # launch the interactive TUI
 ```
 
 `vif` bare on a terminal opens the TUI: pick files, choose a multiplier and
-encoder, then confirm. Confirm starts the run and lands on a live dashboard:
-two columns of cards (Source/Output on the left, RIFE/Encode/System on the
-right) with progress bars, ETA, a frame-rate sparkline and system stats. The
-batch ends on a Summary screen.
+encoder, then confirm. Every screen starts with the queen banner (👑 vif +
+gray author) and ends with a dim key footer. Confirm starts the run and lands
+on a live dashboard: one row per job with a spinner, a blue progress bar, fps,
+ETA and an 8-glyph frame-rate sparkline, plus an overall batch bar. The batch
+ends on a Summary screen.
 
-Processing keys: `c` cancel current job, `n` skip (TODO), `p` pause (TODO),
-`m` toggle mascot, `q` quit (asks first). Summary keys: `enter` open the output
+Menu screens (multiplier, encoder) take number keys `1`-`N` to jump straight
+to an item. Processing keys: `c` cancel current job, `n` skip (TODO), `p`
+pause (TODO), `q` quit (asks first). Summary keys: `enter` open the output
 folder, `c` copy the output list, `r` restart, `q` quit.
 
 ```
-Interpolate  ● Batch 2/5                    MacBook Pro · M5 · VideoToolbox h264
-════════════════════════════════════════════════════════════════════════════════
-◉ Source  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌   ▶ RIFE    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-File   clip1.mp4            Stage  generating frames
-Res    1920 × 1080          Prog   ██████████░░░░░░   62.5%
-FPS    24.00                ETA    00:01:24
-Dur    00:02:15             Speed  8.4 fps
-Frames 3240                 Trend  ▁▂▃▄▅▆▇█▁▁▃▅▆▂▁
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  👑 vif v0.1.0  kesonglab💗 · RIFE 插帧 · queen style
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-▦ Output  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌   ◈ Encode  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-Mult   x4                   Stage  writing video
-Target 96 fps               Prog   █████░░░░░░░░░░░   31.2%
-Enc    VideoToolbox h264    ETA    00:02:10
-Preset balanced             Out    142 MB · 18.2 Mb/s
-Out    ~/interpolated/clip1_96fps.mp4
-                            ⚙ System  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-                            CPU    ████████░░░░░░░░   42.0%
-                            Mem    ████████████░░░░   58.0%
-                            GPU    ▮▮▮▮▯  76%
-════════════════════════════════════════════════════════════════════════════════
-c cancel current  n skip  p pause  m toggle mascot  q quit
+  ⠋ clip1.mp4
+      ███████████████░░░░░░░░░  62.5% generating frames | speed 8.4 fps | eta 01:24  ▁▂▃▄▅▆▇█
+  ⏳ clip2.mp4
+      waiting
+
+  批量进度  ████████████░░░░░░░░░░░░  50%  (1/2)
+    elapsed 00:03:12 | ETA 00:03:12 | press q to abort
+
+c cancel current · n skip · p pause · q quit
 ```
 
 Summary:
 
 ```
-Interpolate  Summary  ● done                MacBook Pro · M5 · VideoToolbox h264
-════════════════════════════════════════════════════════════════════════════════
-✓ Success        4
-✗ Failed         1
-⚠ Skipped        0
-Total time     00:14:32
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-Output files:
-✓ ~/Videos/clip1_96fps.mp4  312.0 MB · 03:12
-✗ ~/Videos/clip3_96fps.mp4  failed: encoder timeout
-════════════════════════════════════════════════════════════════════════════════
-enter open output folder  c copy list  r restart  q quit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  👑 vif v0.1.0  kesonglab💗 · RIFE 插帧 · queen style
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ── Download Results ──
+
+  ✓ Success   4
+  ✗ Failed    1
+
+  ✓ /Users/me/interpolated/clip1_96fps.mp4  312.0 MB · 03:12
+  ✗ /Users/me/interpolated/clip3_96fps.mp4  failed: encoder timeout
+
+enter open output folder · c copy list · r restart · q quit
 ```
 
 ### CLI

@@ -15,7 +15,7 @@ func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
-// updateGolden rewrites golden files when UPDATE_GOLDEN=1 (test helper).
+// writeGolden rewrites golden files when UPDATE_GOLDEN=1 (test helper).
 func writeGolden(t *testing.T, name, got string) {
 	t.Helper()
 	if os.Getenv("UPDATE_GOLDEN") != "1" {
@@ -36,14 +36,11 @@ func TestGolden(t *testing.T) {
 		name string
 		got  string
 	}{
-		{"header", Header("FilePicker", render.IconSystem, "status", render.OK, "", 40)},
-		{"header_right", Header("Encoder", "●", "idle", render.OK, "M2 · hevc", 40)},
-		{"separator", Separator(20)},
-		{"subseparator", SubSeparator(20)},
-		{"card", Card("◉", "Sources", []string{"  one", "  two"}, 40)},
+		{"banner", Banner("vif v0.1.0", "author", 20)},
+		{"box", Box("hello", 20)},
 		{"menu", Menu([]MenuItem{
-			{Label: "x2", Description: "48 fps", Tag: "recommended", TagStyle: render.OK},
-			{Label: "x4", Description: "96 fps"},
+			{Key: "1", Label: "x2", Description: "48 fps", Tag: "recommended", TagStyle: render.Green},
+			{Key: "2", Label: "x4", Description: "96 fps"},
 		}, 1, 40)},
 		{"keyhint", KeyHint([]HintPair{{Key: "enter", Desc: "next"}, {Key: "esc", Desc: "back"}})},
 	}

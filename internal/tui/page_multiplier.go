@@ -3,9 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/kesonglab/video-interpolate/internal/probe"
 	"github.com/kesonglab/video-interpolate/internal/render"
 	"github.com/kesonglab/video-interpolate/internal/tui/components"
@@ -35,17 +35,20 @@ func (p *multiplierPage) Init() tea.Cmd { return nil }
 func (p *multiplierPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		key := msg.Key()
 		switch {
 		case p.km.matches(msg, p.km.Esc):
 			return p, Goto(pageFiles)
-		case p.km.matches(msg, p.km.Up) || msg.Key().Text == "k":
+		case p.km.matches(msg, p.km.Up) || key.Text == "k":
 			if p.cursor > 0 {
 				p.cursor--
 			}
-		case p.km.matches(msg, p.km.Down) || msg.Key().Text == "j":
+		case p.km.matches(msg, p.km.Down) || key.Text == "j":
 			if p.cursor < len(multiplierItems)-1 {
 				p.cursor++
 			}
+		case key.Text == "1" || key.Text == "2" || key.Text == "3":
+			p.cursor = int(key.Text[0] - '1')
 		case p.km.matches(msg, p.km.Enter):
 			p.ctx.Multiplier = multiplierItems[p.cursor]
 			return p, Goto(pageEncoder)
@@ -60,62 +63,51 @@ func (p *multiplierPage) View() tea.View {
 		width = 80
 	}
 
-	var items []components.MenuItem
+	fps := p.sourceFPS()
+	var rows []string
 	for i, m := range multiplierItems {
-		item := components.MenuItem{
-			Label: fmt.Sprintf("x%d", m),
-			Tag:   "",
+		desc := "output fps depends on your source"
+		if fps > 0 {
+			desc = fmt.Sprintf("%.0f fps (from %.0f fps source)", fps*float64(m), fps)
 		}
+		row := render.MenuRow(p.cursor, i, fmt.Sprint(i+1), fmt.Sprintf("x%d", m), desc)
 		if i == 0 {
-			item.Tag = "recommended"
-			item.TagStyle = render.OK
+			row += "  " + render.Green.Render("[recommended]")
 		}
 		if i == 2 {
-			item.Tag = "heavy"
-			item.TagStyle = render.Warn
+			row += "  " + render.Yellow.Render("[heavy]")
 		}
-		items = append(items, item)
+		rows = append(rows, row)
 	}
 
-	card := components.Card(render.IconRife, "Multiplier", []string{
-		"",
-		components.Menu(items, p.cursor, width),
-		"",
-		render.Subtle.Render(p.targetHint()),
-	}, width)
-
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		components.Header("Multiplier", render.IconSystem, p.hardwareText(), render.Primary, "", width),
-		components.Separator(width),
-		"",
-		card,
-		"",
+	body := components.Banner(appTitle(), authorLine, width) + "\n\n" +
+		strings.Join(rows, "\n") + "\n\n" +
 		components.KeyHint([]components.HintPair{
-			{Key: "↑/↓", Desc: "select"},
-			{Key: "enter", Desc: "next"},
+			{Key: "↑/↓", Desc: "navigate"},
+			{Key: "Enter", Desc: "confirm"},
+			{Key: "1-3", Desc: "jump"},
 			{Key: "esc", Desc: "back"},
-		}),
-	)
+		})
 
 	return tea.NewView(body)
 }
 
-// targetHint shows the resulting output fps when a source is probed.
-func (p *multiplierPage) targetHint() string {
-	if len(p.ctx.Files) == 0 {
-		return "output fps depends on your source"
+// sourceFPS returns the first source's fps, probing if we haven't yet.
+func (p *multiplierPage) sourceFPS() float64 {
+	if p.ctx.SourceFPS > 0 {
+		return p.ctx.SourceFPS
 	}
-	info, err := probe.Probe(context.Background(), p.ctx.Files[0])
-	if err != nil || info.FPS <= 0 {
-		return "output fps depends on your source"
+	if len(p.ctx.FileInfo) > 0 {
+		if _, _, fps, _ := parseMediaSummary(p.ctx.FileInfo[0]); fps > 0 {
+			p.ctx.SourceFPS = fps
+			return fps
+		}
 	}
-	target := info.FPS * float64(multiplierItems[p.cursor])
-	return fmt.Sprintf("source %.0ffps → output %.0ffps (x%d)", info.FPS, target, multiplierItems[p.cursor])
-}
-
-func (p *multiplierPage) hardwareText() string {
-	if p.ctx.Caps != nil && p.ctx.Caps.GPUName != "" {
-		return p.ctx.Caps.GPUName
+	if len(p.ctx.Files) > 0 {
+		if info, err := probe.Probe(context.Background(), p.ctx.Files[0]); err == nil && info.FPS > 0 {
+			p.ctx.SourceFPS = info.FPS
+			return info.FPS
+		}
 	}
-	return "VideoToolbox"
+	return 0
 }

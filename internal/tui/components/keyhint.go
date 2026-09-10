@@ -12,11 +12,11 @@ type HintPair struct {
 	Desc string
 }
 
-// KeyHint renders "[key] action" pairs separated by double spaces.
+// KeyHint renders "key action" pairs in the dim gray footer style.
 func KeyHint(pairs []HintPair) string {
 	var parts []string
 	for _, p := range pairs {
-		parts = append(parts, render.Subtle.Render(p.Key)+" "+p.Desc)
+		parts = append(parts, render.Dim.Render(p.Key)+" "+p.Desc)
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, " · ")
 }

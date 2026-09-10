@@ -21,7 +21,7 @@ func TestSummary_View(t *testing.T) {
 	p := NewSummaryPage(ctx).(*summaryState)
 
 	content := p.View().Content
-	for _, want := range []string{"Summary", "Success", "Failed", "Skipped", "Total time", "Output files", "/tmp/clip1_96fps.mp4", "/tmp/clip2_96fps.mp4", "encoder timeout", "312"} {
+	for _, want := range []string{"Download Results", "Success", "Failed", "clip1_96fps.mp4", "clip2_96fps.mp4", "encoder timeout", "312"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("summary view missing %q in:\n%s", want, stripViewANSI(content))
 		}
