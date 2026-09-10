@@ -62,7 +62,7 @@ brews:
     homepage: "https://github.com/kesonglab/video-interpolate"
     description: "AI video frame interpolation TUI"
     license: "MIT"
-    skip: true  # goreleaser 只生成本地 dist/homebrew/vif.rb，推送交给 release workflow 的独立 step 走 git over HTTPS（OAuth token 跨仓 API 推送会被 GitHub 拦 403，git 协议不限）
+    skip_upload: true  # 只生成本地 dist/homebrew/vif.rb，推送交给 release workflow 的独立 step 走 git over HTTPS（OAuth token 跨仓 Contents API 推送会被 GitHub 当 integration 拒 403，git 协议不限）
     install: |
       bin.install "vif"
     test: |
