@@ -1,8 +1,8 @@
 class Vif < Formula
   desc "AI video frame interpolation TUI"
   homepage "https://github.com/kesonglab/video-interpolate"
-  url "https://github.com/kesonglab/video-interpolate/releases/download/v0.1.0/vif_0.1.0_darwin_arm64.tar.gz"
-  sha256 "697b5354a4bcc65f09f843f57bdc21e9671530ec3b053204dc5de67e497c6052"
+  url "https://github.com/kesonglab/video-interpolate/releases/download/v0.2.0/vif_0.2.0_darwin_arm64.tar.gz"
+  sha256 "94b98801aac373e093fe49076f8ebfdf30a410ce9614b016c4a0abaa4cd13030"
   license "MIT"
 
   depends_on "ffmpeg"
