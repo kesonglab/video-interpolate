@@ -2,11 +2,15 @@ package render
 
 import (
 	"flag"
+	"image/color"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2/compat"
 )
 
 // -update rewrites golden files instead of comparing.
@@ -36,6 +40,62 @@ func TestPalette(t *testing.T) {
 			t.Errorf("%s foreground = %v, want %v", c.name, c.got, c.want)
 		}
 	}
+}
+
+func TestAdaptiveColors_LightDark(t *testing.T) {
+	cases := []struct {
+		name string
+		c    compat.AdaptiveColor
+	}{
+		{"green", ColorGreen},
+		{"blue", ColorBlue},
+		{"red", ColorRed},
+		{"yellow", ColorYellow},
+		{"gray", ColorGray},
+	}
+	for _, tc := range cases {
+		if tc.c.Light == nil {
+			t.Errorf("%s: light variant empty", tc.name)
+		}
+		if tc.c.Dark == nil {
+			t.Errorf("%s: dark variant empty", tc.name)
+		}
+		if tc.c.Light == tc.c.Dark {
+			t.Errorf("%s: light and dark are identical (%v) — adaptive theme wouldn't change anything", tc.name, tc.c.Light)
+		}
+	}
+}
+
+func TestAdaptiveColors_BackgroundCheck(t *testing.T) {
+	// light variants need to be dark enough to read on a white background
+	cases := []struct {
+		name string
+		c    compat.AdaptiveColor
+		max  float64
+	}{
+		{"green", ColorGreen, 0.5},
+		{"red", ColorRed, 0.5},
+		{"yellow", ColorYellow, 0.5},
+		{"blue", ColorBlue, 0.4},
+	}
+	for _, tc := range cases {
+		if l := wcagLuminance(tc.c.Light); l >= tc.max {
+			t.Errorf("%s: light luminance %.3f, want < %.1f (too light for white bg)", tc.name, l, tc.max)
+		}
+	}
+}
+
+// wcagLuminance is relative luminance (0-1) per WCAG 2.x.
+func wcagLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	channel := func(v uint32) float64 {
+		s := float64(v) / 65535.0
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(r) + 0.7152*channel(g) + 0.0722*channel(b)
 }
 
 func TestProgressBar(t *testing.T) {

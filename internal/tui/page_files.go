@@ -26,12 +26,12 @@ type addedFile struct {
 // filePickerPage collects source files from a text input, drag-and-drop lines
 // or the clipboard, then hands off to the multiplier screen.
 type filePickerPage struct {
-	ctx    *SharedContext
-	km     keymap
-	ti     textinput.Model
-	files  []addedFile
-	cursor int
-	notice string
+	ctx     *SharedContext
+	km      keymap
+	ti      textinput.Model
+	files   []addedFile
+	cursor  int
+	probeFn func(string) string // probe override for tests
 }
 
 func NewFilePickerPage(ctx *SharedContext) Page {
@@ -40,7 +40,7 @@ func NewFilePickerPage(ctx *SharedContext) Page {
 	ti.CharLimit = 4096
 	ti.Prompt = "▸ "
 	ti.Focus()
-	return &filePickerPage{ctx: ctx, km: defaultKeymap(), ti: ti}
+	return &filePickerPage{ctx: ctx, km: defaultKeymap(), ti: ti, probeFn: probeVideo}
 }
 
 func (p *filePickerPage) Init() tea.Cmd {
@@ -57,9 +57,8 @@ func (p *filePickerPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.ctx.FileInfo = nil
 			return p, Goto(pageWelcome)
 		case p.km.matches(msg, p.km.Enter):
-			added, notice := p.addFromText(p.ti.Value())
-			p.files = append(p.files, added...)
-			p.notice = notice
+			added, missed := p.addFromText(p.ti.Value())
+			p.notify(added, len(missed))
 			p.ti.SetValue("")
 			// enter with an empty box and files already present → advance
 			if p.ti.Value() == "" && len(p.files) > 0 {
@@ -84,13 +83,11 @@ func (p *filePickerPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			}
 		}
 	case tea.PasteMsg:
-		return p, p.paste()
+		// drag-drop / Cmd+V arrives here as one bracketed-paste payload
+		p.ingest(msg.Content)
+		return p, nil
 	case clipboardMsg:
-		for _, line := range msg.lines {
-			added, _ := p.addFromText(line)
-			p.files = append(p.files, added...)
-		}
-		p.ti.SetValue("")
+		p.ingest(strings.Join(msg.lines, "\n"))
 		return p, nil
 	}
 
@@ -114,21 +111,96 @@ func (p *filePickerPage) paste() tea.Cmd {
 	return func() tea.Msg { return readClipboard() }
 }
 
-func (p *filePickerPage) addFromText(text string) ([]addedFile, string) {
-	var out []addedFile
-	for _, line := range expandInput(text) {
-		for _, path := range expandPath(line) {
-			info := probeVideo(path)
-			if info == "" {
-				continue
-			}
-			out = append(out, addedFile{Path: path, Info: info, Found: true})
+// ingest parses pasted/dropped text and adds whatever resolves to video.
+func (p *filePickerPage) ingest(text string) {
+	added, missed := p.addFromText(text)
+	p.notify(added, len(missed))
+}
+
+// notify surfaces add/miss counts as an app-level toast.
+func (p *filePickerPage) notify(added, missed int) {
+	switch {
+	case added > 0 && missed > 0:
+		p.ctx.AddToast(fmt.Sprintf("已加入 %d 个，%d 个未识别", added, missed))
+	case missed > 0:
+		p.ctx.AddToast(fmt.Sprintf("%d 个路径未识别", missed))
+	case added > 0:
+		p.ctx.AddToast(fmt.Sprintf("已加入 %d 个文件", added))
+	}
+}
+
+// addFromText ingests typed or pasted text: each line is tried whole first
+// (paths with plain spaces), then shell-split (escapes/quotes/multi-file).
+func (p *filePickerPage) addFromText(text string) (added int, missed []string) {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		if len(out) == 0 {
-			return nil, render.Yellow.Render("⚠ not found: " + line)
+		if n := p.tryAddPath(line); n > 0 {
+			added += n
+			continue
+		}
+		for _, tok := range parsePastedPaths(line) {
+			if n := p.tryAddPath(tok); n > 0 {
+				added += n
+			} else {
+				missed = append(missed, tok)
+			}
 		}
 	}
-	return out, ""
+	if added > 0 {
+		p.ti.SetValue("")
+	}
+	return added, missed
+}
+
+// tryAddPath resolves one path (file or directory) and appends its videos.
+func (p *filePickerPage) tryAddPath(path string) int {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	var candidates []string
+	switch {
+	case fi.IsDir():
+		candidates = expandPath(path)
+	case isVideoExt(path):
+		candidates = []string{path}
+	default:
+		return 0
+	}
+	n := 0
+	for _, c := range candidates {
+		if p.hasFile(c) {
+			n++ // already queued, not a miss
+			continue
+		}
+		info := p.probe(c)
+		if info == "" {
+			continue
+		}
+		p.files = append(p.files, addedFile{Path: c, Info: info, Found: true})
+		n++
+	}
+	return n
+}
+
+func (p *filePickerPage) hasFile(path string) bool {
+	for _, f := range p.files {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// probe runs the injected prober, falling back to the real one.
+func (p *filePickerPage) probe(path string) string {
+	if p.probeFn != nil {
+		return p.probeFn(path)
+	}
+	return probeVideo(path)
 }
 
 func (p *filePickerPage) syncCtx() {
@@ -169,11 +241,9 @@ func (p *filePickerPage) View() tea.View {
 	}
 
 	body := banner + "\n\n" + box + "\n\n" + strings.Join(lines, "\n")
-	if p.notice != "" {
-		body += "\n\n" + p.notice
-	}
 	body += "\n\n" + components.KeyHint([]components.HintPair{
-		{Key: "enter", Desc: "add / next"},
+		{Key: "drag", Desc: "drop files"},
+		{Key: "enter", Desc: "next"},
 		{Key: "p", Desc: "paste"},
 		{Key: "backspace", Desc: "remove"},
 		{Key: "esc", Desc: "back"},
@@ -182,46 +252,16 @@ func (p *filePickerPage) View() tea.View {
 	return tea.NewView(body)
 }
 
-// expandInput splits a drag line on spaces, rejoining escaped `\ ` pairs.
-func expandInput(line string) []string {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return nil
-	}
-	if !strings.Contains(line, `\ `) {
-		return []string{line}
-	}
+// expandPath turns a single directory into its matching video files.
+func expandPath(path string) []string {
 	var out []string
-	for _, part := range strings.Fields(line) {
-		out = append(out, strings.ReplaceAll(part, `\ `, " "))
+	entries, _ := os.ReadDir(path)
+	for _, e := range entries {
+		if !e.IsDir() && isVideoExt(e.Name()) {
+			out = append(out, filepath.Join(path, e.Name()))
+		}
 	}
 	return out
-}
-
-// expandPath turns a single path (file or directory) into matching videos.
-func expandPath(path string) []string {
-	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
-		return []string{path}
-	}
-	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-		var out []string
-		entries, _ := os.ReadDir(path)
-		for _, e := range entries {
-			if !e.IsDir() && videoExt(e.Name()) {
-				out = append(out, filepath.Join(path, e.Name()))
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-func videoExt(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".ts", ".m4v", ".wmv":
-		return true
-	}
-	return false
 }
 
 // probeVideo returns a "WxH · fps · dur" summary, or "" if it can't probe.

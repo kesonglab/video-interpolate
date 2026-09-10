@@ -4,15 +4,36 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 )
 
-// queen palette: five colors, nothing else.
+// queen palette hex values. Light variants are darker/more saturated so they
+// read on white; dark variants keep the original bright queen values.
+const (
+	hexGreenLight  = "#0a7d3e"
+	hexGreenDark   = "#00ff87"
+	hexBlueLight   = "#005fb8"
+	hexBlueDark    = "#00a6ff"
+	hexRedLight    = "#c41e3a"
+	hexRedDark     = "#ff4d4f"
+	hexYellowLight = "#8a6500"
+	hexYellowDark  = "#ffcc00"
+	hexGrayLight   = "#666666"
+	hexGrayDark    = "#888888"
+	hexSepLight    = "#cccccc"
+	hexSepDark     = "#666666"
+)
+
+// queen palette: five colors, picked per terminal background by
+// compat.AdaptiveColor (OSC 10/11, COLORFGBG).
 var (
-	ColorGreen  = lipgloss.Color("#00ff87")
-	ColorBlue   = lipgloss.Color("#00a6ff")
-	ColorRed    = lipgloss.Color("#ff4d4f")
-	ColorYellow = lipgloss.Color("#ffcc00")
-	ColorGray   = lipgloss.Color("#888888")
+	ColorGreen     = compat.AdaptiveColor{Light: lipgloss.Color(hexGreenLight), Dark: lipgloss.Color(hexGreenDark)}
+	ColorBlue      = compat.AdaptiveColor{Light: lipgloss.Color(hexBlueLight), Dark: lipgloss.Color(hexBlueDark)}
+	ColorRed       = compat.AdaptiveColor{Light: lipgloss.Color(hexRedLight), Dark: lipgloss.Color(hexRedDark)}
+	ColorYellow    = compat.AdaptiveColor{Light: lipgloss.Color(hexYellowLight), Dark: lipgloss.Color(hexYellowDark)}
+	ColorGray      = compat.AdaptiveColor{Light: lipgloss.Color(hexGrayLight), Dark: lipgloss.Color(hexGrayDark)}
+	BoxBorderColor = compat.AdaptiveColor{Light: lipgloss.Color(hexBlueLight), Dark: lipgloss.Color(hexBlueDark)}
+	SepColor       = compat.AdaptiveColor{Light: lipgloss.Color(hexSepLight), Dark: lipgloss.Color(hexSepDark)}
 )
 
 var (
@@ -24,8 +45,8 @@ var (
 	Green  = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 	Sel    = lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 	Dim    = lipgloss.NewStyle().Foreground(ColorGray)
-	Sep    = lipgloss.NewStyle().Foreground(ColorGray).Faint(true)
-	Box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorBlue).Padding(0, 1)
+	Sep    = lipgloss.NewStyle().Foreground(SepColor).Faint(true)
+	Box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(BoxBorderColor).Padding(0, 1)
 
 	// aliases so CLI/doctor keep compiling
 	Primary = Accent

@@ -4,6 +4,14 @@ All notable changes to vif are documented here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-10
+
+### Added
+- FilePicker 支持拖入即加：从 Finder / iTerm2 拖视频（或文件夹）到 TUI 窗口，路径作为 bracketed paste 一次性进来，自动解析、去重、加入队列。多文件批量、带引号/转义空格的路径、目录展开都支持。不用 focus 输入框，不用按 enter 加。`p` 剪贴板、`backspace` 删除、手动 type 兜底全部保留。拖入不存在的路径或非视频文件弹 toast。
+
+### Changed
+- 色板改成 `compat.AdaptiveColor`（lipgloss v2 的 adaptive 实现）：light 主题用更深的 green/blue/red/yellow/gray，dark 主题保持 queen 原来的亮色。终端主题走 OSC 10/11 / COLORFGBG 自动检测，白底不再瞎眼。
+
 ## [0.2.0] - 2026-09-10
 
 ### Changed

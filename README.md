@@ -54,6 +54,13 @@ vif update --check  # 只检查不更新
 - ffmpeg + ffprobe (`brew install ffmpeg` or `apt install ffmpeg`)
 - rife-ncnn-vulkan for actual interpolation (run `vif doctor` to verify; will prompt to install)
 
+## Themes
+
+vif uses lipgloss.AdaptiveColor to support both light and dark terminal
+backgrounds automatically. iTerm2, WezTerm, Ghostty, Terminal.app, and
+most modern terminals report their theme via OSC 10/11; vif detects and
+adapts. If your terminal doesn't report a theme, vif defaults to dark.
+
 ## Quick Start
 
 TUI（默认）：
@@ -89,6 +96,13 @@ Menu screens (multiplier, encoder) take number keys `1`-`N` to jump straight
 to an item. Processing keys: `c` cancel current job, `n` skip (TODO), `p`
 pause (TODO), `q` quit (asks first). Summary keys: `enter` open the output
 folder, `c` copy the output list, `r` restart, `q` quit.
+
+#### File Picker
+
+把视频文件（或文件夹）从 Finder / iTerm2 拖进 TUI 窗口即可。多个文件一起
+拖会全部加入。不用 focus 输入框，不用按 enter 加，按 enter 是进入下一步。
+拖错文件（不存在或不是视频）会在底部弹一个几秒的 toast。`p` 从剪贴板读
+路径、`backspace` 删最后一个、手动 type 路径仍可用。
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
