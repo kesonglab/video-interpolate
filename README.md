@@ -24,7 +24,7 @@ brew install kesonglab/tap/vif
 ### Install Script (macOS / Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kesonglab/video-interpolate/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kesonglab/video-interpolate/master/install.sh | bash
 ```
 
 装到 `/usr/local/bin`（可写时）或 `~/.local/bin`。可用环境变量覆盖：

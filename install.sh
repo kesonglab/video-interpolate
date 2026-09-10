@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # vif installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/kesonglab/video-interpolate/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/kesonglab/video-interpolate/master/install.sh | bash
 # Options:
 #   VIF_INSTALL_DIR=/path    install to /path (default /usr/local/bin or ~/.local/bin)
 #   VIF_VERSION=v0.1.0       install specific version (default: latest)
@@ -18,9 +18,9 @@ if [[ -z "$INSTALL_DIR" ]]; then
         INSTALL_DIR="/usr/local/bin"
     else
         INSTALL_DIR="$HOME/.local/bin"
-        mkdir -p "$INSTALL_DIR"
     fi
 fi
+mkdir -p "$INSTALL_DIR"
 
 # detect OS/arch
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
