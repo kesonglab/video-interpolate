@@ -1,7 +1,9 @@
 package system
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,31 +19,35 @@ type Dependency struct {
 }
 
 // CheckDependencies probes ffmpeg, ffprobe, rife-ncnn-vulkan.
+// rife has a special recursive lookup since the GitHub release zip unpacks
+// into a versioned subdirectory like rife-ncnn-vulkan-<date>-macos/.
 func CheckDependencies() []Dependency {
-	probes := []struct {
-		name string
-		bin  string
-		hint string
-	}{
-		{"ffmpeg", "ffmpeg", "brew install ffmpeg"},
-		{"ffprobe", "ffprobe", "brew install ffmpeg"},
-		{"rife-ncnn-vulkan", "rife-ncnn-vulkan", "download from https://github.com/nihui/rife-ncnn-vulkan"},
+	deps := []Dependency{
+		probeDep("ffmpeg", "ffmpeg", "brew install ffmpeg"),
+		probeDep("ffprobe", "ffprobe", "brew install ffmpeg"),
 	}
-	deps := make([]Dependency, 0, len(probes))
-	for _, p := range probes {
-		d := Dependency{Name: p.name, Path: FindExecutable(p.bin)}
-		if d.Path != "" {
-			d.OK = true
-			d.Version = GetVersion(p.bin)
-		} else {
-			d.FixHint = p.hint
-		}
-		deps = append(deps, d)
+	d := Dependency{Name: "rife-ncnn-vulkan", FixHint: "download from https://github.com/nihui/rife-ncnn-vulkan"}
+	if p, err := FindRifeBinary(); err == nil {
+		d.Path = p
+		d.OK = true
 	}
+	deps = append(deps, d)
 	return deps
 }
 
-// FindRifeBinary looks for rife-ncnn-vulkan in PATH then ~/rife-ncnn-vulkan.
+func probeDep(name, bin, hint string) Dependency {
+	d := Dependency{Name: name, Path: FindExecutable(bin), FixHint: hint}
+	if d.Path != "" {
+		d.OK = true
+		d.Version = GetVersion(bin)
+	}
+	return d
+}
+
+// FindRifeBinary looks for rife-ncnn-vulkan in PATH then recursively in
+// ~/rife-ncnn-vulkan/. The GitHub release zip unpacks into a versioned
+// subdirectory (e.g. rife-ncnn-vulkan-20221029-macos/) so a fixed path
+// check won't find it — we walk the tree and pick the first match.
 func FindRifeBinary() (string, error) {
 	if p := FindExecutable("rife-ncnn-vulkan"); p != "" {
 		return p, nil
@@ -50,15 +56,28 @@ func FindRifeBinary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, c := range []string{
-		filepath.Join(home, "rife-ncnn-vulkan", "rife-ncnn-vulkan"),
-		filepath.Join(home, "rife-ncnn-vulkan", "bin", "rife-ncnn-vulkan"),
-	} {
-		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
-			return c, nil
+	root := filepath.Join(home, "rife-ncnn-vulkan")
+	var found string
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == "rife-ncnn-vulkan" {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if walkErr != nil && !errors.Is(walkErr, fs.ErrNotExist) {
+		return "", walkErr
 	}
-	return "", fmt.Errorf("rife-ncnn-vulkan not found")
+	if found != "" {
+		return found, nil
+	}
+	return "", fmt.Errorf("rife-ncnn-vulkan not found in PATH or %s", root)
 }
 
 // FindExecutable is a helper.
