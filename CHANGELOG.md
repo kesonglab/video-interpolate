@@ -4,6 +4,14 @@ All notable changes to vif are documented here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-10
+
+### Changed
+- Homebrew formula 改成 multi-arch：原来手动写的单 arch darwin_arm64，现在 goreleaser 自动生成 darwin/intel/linux × arm64/amd64 全部组合。`brew install kesonglab/tap/vif` 自动选当前平台的 binary。
+
+### Fixed
+- 发布链路自动化：之前每个版本要手动算 sha256 + 推 homebrew-tap，因为 OAuth token 走 GitHub Contents API 跨仓会被当 integration 拒 403。改成 goreleaser 只本地生成公式（`skip_upload: true`），release workflow 单独走 git over HTTPS 推公式（OAuth token 走 git 协议不受 integration check 限制）。
+
 ## [0.3.0] - 2026-09-10
 
 ### Added
