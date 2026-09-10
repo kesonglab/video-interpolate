@@ -6,7 +6,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: macos-latest  # macOS runner（未来要用 codesign/notarytool）
     steps:
       - uses: actions/checkout@v4
@@ -22,4 +22,25 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # TAP_GITHUB_TOKEN 不用传给 goreleaser —— 它走 Contents API 跨仓
+          # 推送会被 GitHub 当 integration 拒 403（OAuth token 的限制）。
+          # 公式推送交给下面独立的 step 走 git over HTTPS。
+
+      - name: Push formula to homebrew-tap
+        env:
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/kesonglab/homebrew-tap.git" tap
+          cp dist/homebrew/vif.rb tap/Formula/vif.rb
+          cd tap
+          git config user.name "vif-bot"
+          git config user.email "vif-bot@users.noreply.github.com"
+          git add Formula/vif.rb
+          if git diff --staged --quiet; then
+            echo "no formula changes, skipping push"
+          else
+            git commit -m "vif ${VERSION}"
+            git push origin main
+          fi
